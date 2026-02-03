@@ -1,0 +1,230 @@
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/todo_model.dart';
+import '../pages/login_page.dart';
+
+class TodoController extends GetxController {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final Box<TodoModel> _box = Hive.box<TodoModel>('todos');
+
+  final RxList<TodoModel> todos = <TodoModel>[].obs;
+  final RxBool isLoading = false.obs;
+
+  StreamSubscription? _authSub;
+  StreamSubscription? _connectivitySub;
+  StreamSubscription? _firestoreSub;
+
+  String? get _uid => _auth.currentUser?.uid;
+
+  @override
+  void onInit() {
+    super.onInit();
+    _listenAuthChanges();
+    _listenConnectivity();
+    _loadLocal();
+  }
+
+  @override
+  void onClose() {
+    _authSub?.cancel();
+    _connectivitySub?.cancel();
+    _firestoreSub?.cancel();
+    super.onClose();
+  }
+
+  // ================= AUTH LISTENER =================
+
+  void _listenAuthChanges() {
+    _authSub = _auth.authStateChanges().listen((user) async {
+      if (user == null) {
+        await _box.clear();
+        todos.clear();
+        Get.offAll(() => const LoginPage());
+      } else {
+        await _startRealtimeSync();
+        await syncPendingToServer();
+      }
+    });
+  }
+
+  // ================= CONNECTIVITY =================
+
+  void _listenConnectivity() {
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen((result) async {
+      if (result != ConnectivityResult.none) {
+        await syncPendingToServer();
+      }
+    });
+  }
+
+  // ================= LOCAL LOAD =================
+
+  void _loadLocal() {
+    todos.value =
+        _box.values.where((e) => !e.isDeleted).toList();
+  }
+
+  // ================= ADD TODO =================
+
+  Future<void> addTodo(String title) async {
+    if (title.trim().isEmpty) return;
+
+    final todo = TodoModel(
+      title: title,
+      isDone: false,
+      firebaseId: null,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      isDeleted: false,
+      needsSync: true,
+    );
+
+    await _box.add(todo);
+    _loadLocal();
+    await syncPendingToServer();
+  }
+
+  // ================= UPDATE TODO =================
+
+  Future<void> toggleTodo(int index) async {
+    final todo = todos[index];
+
+    todo.isDone = !todo.isDone;
+    todo.updatedAt = DateTime.now();
+    todo.needsSync = true;
+
+    await todo.save();
+    _loadLocal();
+    await syncPendingToServer();
+  }
+
+  // ================= DELETE TODO (Soft Delete) =================
+
+  Future<void> deleteTodo(int index) async {
+    final todo = todos[index];
+
+    todo.isDeleted = true;
+    todo.updatedAt = DateTime.now();
+    todo.needsSync = true;
+
+    await todo.save();
+    _loadLocal();
+    await syncPendingToServer();
+  }
+
+  // ================= SYNC LOCAL -> FIRESTORE =================
+
+  Future<void> syncPendingToServer() async {
+    if (_uid == null) return;
+
+    final pending =
+        _box.values.where((e) => e.needsSync).toList();
+
+    for (var todo in pending) {
+      try {
+        if (todo.firebaseId == null) {
+          // CREATE
+          final doc = await _firestore
+              .collection('users')
+              .doc(_uid)
+              .collection('todos')
+              .add(_toMap(todo));
+
+          todo.firebaseId = doc.id;
+        } else {
+          // UPDATE / DELETE
+          await _firestore
+              .collection('users')
+              .doc(_uid)
+              .collection('todos')
+              .doc(todo.firebaseId)
+              .set(_toMap(todo), SetOptions(merge: true));
+        }
+
+        todo.needsSync = false;
+        await todo.save();
+      } catch (_) {
+        // Fail silently, retry on next connectivity
+      }
+    }
+
+    _loadLocal();
+  }
+
+  // ================= FIRESTORE REALTIME SYNC =================
+
+  Future<void> _startRealtimeSync() async {
+    if (_uid == null) return;
+
+    _firestoreSub?.cancel();
+
+    _firestoreSub = _firestore
+        .collection('users')
+        .doc(_uid)
+        .collection('todos')
+        .snapshots()
+        .listen((snapshot) async {
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+
+        final existing = _box.values
+            .where((e) => e.firebaseId == doc.id)
+            .firstOrNull;
+
+        if (existing == null) {
+          // ADD NEW FROM SERVER
+          final newTodo = TodoModel(
+            title: data['title'],
+            isDone: data['isDone'],
+            firebaseId: doc.id,
+            createdAt: (data['createdAt'] as Timestamp).toDate(),
+            updatedAt: (data['updatedAt'] as Timestamp).toDate(),
+            isDeleted: data['isDeleted'],
+            needsSync: false,
+          );
+
+          await _box.add(newTodo);
+        } else {
+          final serverUpdated =
+              (data['updatedAt'] as Timestamp).toDate();
+
+          if (serverUpdated.isAfter(existing.updatedAt)) {
+            existing.title = data['title'];
+            existing.isDone = data['isDone'];
+            existing.updatedAt = serverUpdated;
+            existing.isDeleted = data['isDeleted'];
+            existing.needsSync = false;
+            await existing.save();
+          }
+        }
+      }
+
+      _loadLocal();
+    });
+  }
+
+  // ================= LOGOUT =================
+
+  Future<void> logout() async {
+    await _auth.signOut();
+  }
+
+  // ================= HELPER =================
+
+  Map<String, dynamic> _toMap(TodoModel todo) {
+    return {
+      'title': todo.title,
+      'isDone': todo.isDone,
+      'createdAt': todo.createdAt,
+      'updatedAt': todo.updatedAt,
+      'isDeleted': todo.isDeleted,
+    };
+  }
+}
