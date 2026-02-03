@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:ofatodoapps/controller/todo_model_controller.dart';
+import 'package:ofatodoapps/pages/login_page.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -142,17 +143,14 @@ class _SignUpPageState extends State<SignupPage> {
                       const Text("Have an account? "),
                       GestureDetector(
                         onTap: () {
+                          Get.to(()=>LoginPage());
                           // TODO: Navigate to signup page
                         },
-                        child: GestureDetector(
-                          onTap: () => Get.to(SignupPage()),
-
-                          child: const Text(
-                            'Sign In',
-                            style: TextStyle(
-                              color: Colors.deepPurple,
-                              fontWeight: FontWeight.bold,
-                            ),
+                        child: const Text(
+                          'Sign In',
+                          style: TextStyle(
+                            color: Colors.deepPurple,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
