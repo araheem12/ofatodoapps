@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "538455233302",
+    "project_id": "todoapp-firstofflineapproach",
+    "storage_bucket": "todoapp-firstofflineapproach.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:538455233302:android:ce5251c14c43cb3beef637",
+        "android_client_info": {
+          "package_name": "com.example.ofatodoapps"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDA9vDI6p2Oy7RaVbLbBX1RPJ9k06XPeJU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
